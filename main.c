@@ -21,8 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "mpu6050.h"
-#include "bmp280.h"
+#include "joystick.h"
+#include "nrf24l01p.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,35 +44,29 @@
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
-I2C_HandleTypeDef hi2c1;
+SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN PV */
-////////////MPU6050 PV///////////////
-int MPU6050_adress;
-int16_t MPU6050_AccelRaw[3];
-int16_t MPU6050_GyroRaw[3];
-float MPU6050_AccelIng[3];
-float MPU6050_GyroIns[3];
-float ROLL;
-float PITCH;
-//////////////////////////////////////
-///////////BMP280 PV//////////////////
-int BMP280_adress;
-float temperature;
-float pressure;
-float p0;
-float altitude;
-float filtered_altitude;
-///////////////////////////////////////
-
+///////////////////Joystick pvs////////////////////////////////
+int8_t ROLL_joystick;
+int8_t PITCH_joystick;
+int8_t YAW_joystick;
+int8_t ALTITUDE_joystick;
+uint16_t X;
+uint16_t Y;
+uint16_t Xx;
+uint16_t Yy;
+///////////////////NRF24L01P PVS///////////////////////////////
+uint8_t Status_NRF;
+uint8_t SendBuffer[4];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_I2C1_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -112,24 +106,16 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_I2C1_Init();
   MX_ADC1_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-/////////////MPU6050 CODES////////////////////
-MPU6050_adress = MPU6050_ScanDeviceID(&hi2c1);
-MPU6050_Init(&hi2c1, MPU6050_ACCEL_RANGE_8G, MPU6050_GYRO_RANGE_2000);
-CalibrateGyroBias(&hi2c1, MPU6050_GYRO_RANGE_2000, 500);
-InitRollAndPitchFromAccel(&hi2c1, MPU6050_ACCEL_RANGE_8G);
-////////////////////////////////////////////////////////////////////////
-////////////////BMP280 CODES////////////////////////////////////////////
-BMP280_adress = BMP280_ScanDevıceID(&hi2c1);
-BMP280_Init(&hi2c1);
-HAL_Delay(25);//init sonrasi hazir olamiyor ve p0a cop deger veriyordu
-ReadCalibrationData(&hi2c1);
-BMP280_ReadSensorData(&hi2c1, &temperature, &p0);//baslangic basinc degeri bulundugu yukseklik = 0 alabilmesi icin.
-BMP280_ReadSensorData(&hi2c1, &temperature, &pressure);
-filtered_altitude = PressureToAltitude(pressure, p0);
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////JOYSTICK CODES//////////////////////////////
+JoystickInit(&hadc1);
+HAL_Delay(50);//cop degerler gelmesin joystickler hazir olsun.
+getADCValues(&X, &Y,&Xx,&Yy);
+
+////////////////////NRF24L01P CODES////////////////////////////
+nrf24l01p_tx_init(2, _1Mbps);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -139,20 +125,18 @@ filtered_altitude = PressureToAltitude(pressure, p0);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  ////////////////////JOYSTICK CODES////////////////////////////
+      ConvertToAngle(&ROLL_joystick, &PITCH_joystick, &YAW_joystick, &ALTITUDE_joystick,X,Y,Xx,Yy);
 
-	  ///////////////MPU6050 CODES////////////////
-	  MPU6050_getAccelValue(&hi2c1, MPU6050_AccelRaw);
-	  MPU6050_getGyroValue(&hi2c1, MPU6050_GyroRaw);
-	  MPU6050_getAccelInG(MPU6050_AccelRaw, MPU6050_ACCEL_RANGE_8G, MPU6050_AccelIng);
-	  MPU6050_getGyroIns(MPU6050_GyroRaw, MPU6050_GYRO_RANGE_2000, MPU6050_GyroIns);
-	  UpdateRollAndPitch(&hi2c1, MPU6050_ACCEL_RANGE_8G, MPU6050_GYRO_RANGE_2000, &ROLL, &PITCH);
-	  /////////////////////////////////////////////////////////////////////////////////////////////
-	  ////////////////BMP280codes/////////////////
-      BMP280_ReadSensorData(&hi2c1, &temperature, &pressure);
-      altitude = PressureToAltitude(pressure, p0);
-      filtered_altitude = FilterAltitude(altitude, filtered_altitude);
-      //////////////////////////////////////////////////////////////////////////////////////////////
-
+      ////////////////////NRF24L01P CODES/////////////////////////////////////////////////////////
+      Status_NRF = nrf24l01p_get_status();
+      SendBuffer[0]=(uint8_t)ROLL_joystick;
+      SendBuffer[1]=(uint8_t)PITCH_joystick;
+      SendBuffer[2]=(uint8_t)YAW_joystick;
+      SendBuffer[3]=(uint8_t)ALTITUDE_joystick;
+      for (int i = 0; i <= 3; ++i) {//ayri bir rf kodu olusturup txfifoyu temizleme kodu eklenecek.
+    	  nrf24l01p_tx_transmit(&SendBuffer[i]);
+	}
 
   }
   /* USER CODE END 3 */
@@ -166,11 +150,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
-  /** Configure the main internal regulator output voltage
-  */
-  __HAL_RCC_PWR_CLK_ENABLE();
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -178,12 +158,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 50;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 7;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -193,12 +168,18 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV2;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
@@ -222,30 +203,52 @@ static void MX_ADC1_Init(void)
 
   /* USER CODE END ADC1_Init 1 */
 
-  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  /** Common config
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
-  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.NbrOfConversion = 4;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_0;
-  sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Rank = ADC_REGULAR_RANK_2;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_2;
+  sConfig.Rank = ADC_REGULAR_RANK_3;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_3;
+  sConfig.Rank = ADC_REGULAR_RANK_4;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -257,36 +260,40 @@ static void MX_ADC1_Init(void)
 }
 
 /**
-  * @brief I2C1 Initialization Function
+  * @brief SPI1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_I2C1_Init(void)
+static void MX_SPI1_Init(void)
 {
 
-  /* USER CODE BEGIN I2C1_Init 0 */
+  /* USER CODE BEGIN SPI1_Init 0 */
 
-  /* USER CODE END I2C1_Init 0 */
+  /* USER CODE END SPI1_Init 0 */
 
-  /* USER CODE BEGIN I2C1_Init 1 */
+  /* USER CODE BEGIN SPI1_Init 1 */
 
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
-  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN I2C1_Init 2 */
+  /* USER CODE BEGIN SPI1_Init 2 */
 
-  /* USER CODE END I2C1_Init 2 */
+  /* USER CODE END SPI1_Init 2 */
 
 }
 
@@ -297,12 +304,12 @@ static void MX_DMA_Init(void)
 {
 
   /* DMA controller clock enable */
-  __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
-  /* DMA2_Stream0_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
 
@@ -313,6 +320,7 @@ static void MX_DMA_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -320,6 +328,16 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, ce_Pin|nss_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : ce_Pin nss_Pin */
+  GPIO_InitStruct.Pin = ce_Pin|nss_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
