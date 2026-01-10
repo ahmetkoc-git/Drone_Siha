@@ -16,8 +16,8 @@
 
 
 static float s_gyrobias[3] = {0};
-static float s_roll_deg      = 0.0f;  // fused roll açısı (°)
-static uint32_t s_t_prev_ms  = 0;     // zaman damgası
+static float s_roll_deg      = 0.0f;
+static uint32_t s_t_prev_ms  = 0;
 static float s_pitch_deg    = 0.0f;
 
 int MPU6050_ScanDeviceID(I2C_HandleTypeDef *hi2cx){
@@ -61,7 +61,7 @@ MPU6050InitStatus MPU6050_Init(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_
 	MPU6050ReadStatus st= MPU6050_ReadRegisterData(hi2cx, MPU6050_REG_WHO_AM_I, 1, &dataBuffer);
 
 	if (st != READ_SUCCESS) {
-	    return INIT_FAIL; // burada istersen ayrı bir hata kodu dön
+	    return INIT_FAIL;
 	}
 	if (!(dataBuffer == 0x68 || dataBuffer == 0x70)) {
 			return INIT_FAIL;
@@ -269,7 +269,7 @@ void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SE
 
     float alpha=ALPHA;
     if (*a_norm < 0.70f || *a_norm > 1.50f) {
-        alpha = 1.0f;   // 0.996-0.999 arası deneyebilirsin
+        alpha = 1.0f;
     }
 
 
