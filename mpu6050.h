@@ -95,16 +95,6 @@ typedef struct{
 }Config_DLPF_t;
 
 
-
-
-
-
-
-
-
-
-
-
 int MPU6050_ScanDeviceID(I2C_HandleTypeDef *hi2cx);
 MPU6050InitStatus MPU6050_Init(I2C_HandleTypeDef *hi2cx,uint8_t AFS_SEL, uint8_t FS_SEL);
 void MPU6050_getAccelValue(I2C_HandleTypeDef *hi2cx, int16_t *accelData);
@@ -114,5 +104,5 @@ void MPU6050_getAccelInG(int16_t *accelData, uint8_t AFS_SEL,float *accelDataInG
 void MPU6050_getGyroIns(int16_t *gyroData, uint8_t FS_SEL,float *gyroDataIns);
 void CalibrateGyroBias(I2C_HandleTypeDef *hi2cx,uint8_t FS_SEL, uint16_t Sample);
 void InitRollAndPitchFromAccel(I2C_HandleTypeDef *hi2cx,uint8_t AFS_SEL);
-void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SEL, float *roll_out, float *pitch_out);
+void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SEL, float *roll_out, float *pitch_out,float *a_norm);
 #endif /* INC_MPU6050_H_ */
