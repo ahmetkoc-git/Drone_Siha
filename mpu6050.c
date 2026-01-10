@@ -12,7 +12,7 @@
 #endif
 
 #define RAD2DEG  (180.0f / (float)M_PI)
-#define ALPHA 0.98
+#define ALPHA 0.985
 
 
 static float s_gyrobias[3] = {0};
@@ -40,7 +40,7 @@ static MPU6050ReadStatus MPU6050_ReadRegisterData(I2C_HandleTypeDef *hi2cx , uin
 }
 
 static MPU6050WriteStatus MPU6050_WriteRegisterData(I2C_HandleTypeDef *hi2cx,
-		uint16_t registerAddress, uint16_t value) {
+		uint8_t registerAddress, uint8_t value) {
 
 	uint8_t data[2] = { 0 };
 	data[0] = registerAddress;
@@ -58,12 +58,13 @@ MPU6050InitStatus MPU6050_Init(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_
 
 	uint8_t dataBuffer = 0;
 
-	MPU6050_ReadRegisterData(hi2cx, MPU6050_REG_WHO_AM_I, 1, &dataBuffer);
+	MPU6050ReadStatus st= MPU6050_ReadRegisterData(hi2cx, MPU6050_REG_WHO_AM_I, 1, &dataBuffer);
 
-	if (dataBuffer != 0x68) {
-
+	if (st != READ_SUCCESS) {
+	    return INIT_FAIL; // burada istersen ayrı bir hata kodu dön
+	}
+	if (!(dataBuffer == 0x68 || dataBuffer == 0x70)) {
 			return INIT_FAIL;
-
 		}
 
 	uint8_t tempReg = 0;
@@ -82,14 +83,14 @@ MPU6050InitStatus MPU6050_Init(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_
 
 		AccelConfigRegister_t accelConfig = { 0 };
 
-			accelConfig.Reserved = 0;
-			accelConfig.AFS_Sel = AFS_SEL;
-			accelConfig.ZA_ST = 0;
-			accelConfig.YA_ST = 0;
-			accelConfig.XA_ST = 0;
+					accelConfig.Reserved = 0;
+					accelConfig.AFS_Sel = AFS_SEL;
+					accelConfig.ZA_ST = 0;
+					accelConfig.YA_ST = 0;
+					accelConfig.XA_ST = 0;
 
-			tempReg = *((uint8_t*) &accelConfig);
-			MPU6050_WriteRegisterData(hi2cx, MPU6050_REG_ACCEL_CONFIG, tempReg);
+					tempReg = *((uint8_t*) &accelConfig);
+					MPU6050_WriteRegisterData(hi2cx, MPU6050_REG_ACCEL_CONFIG, tempReg);
 
 	  	GyroConfigRegister_t gyroConfig = { 0 };
 
@@ -202,7 +203,6 @@ void MPU6050_getGyroIns(int16_t *gyroData, uint8_t FS_SEL,float *gyroDataIns) {
 }
 
 void CalibrateGyroBias(I2C_HandleTypeDef *hi2cx,uint8_t FS_SEL, uint16_t Sample){
-
 	int16_t gyroRaw[3];//ham degerler
 	float gyroDps[3]; //fiziksel degerler
 
@@ -240,13 +240,14 @@ void InitRollAndPitchFromAccel(I2C_HandleTypeDef *hi2cx,uint8_t AFS_SEL){
 	 s_t_prev_ms  = HAL_GetTick();
 }
 
-void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SEL, float *roll_out, float *pitch_out){
+void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SEL, float *roll_out, float *pitch_out,float *a_norm){
 
 	uint32_t t_now = HAL_GetTick();
 	float dt = (t_now - s_t_prev_ms) / 1000.0f;
     if (dt <= 0.0f){
     	dt = 1e-3f;
     }
+
     s_t_prev_ms = t_now;
 
     int16_t acc_raw[3], gyro_raw[3];
@@ -264,15 +265,20 @@ void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SE
     float roll_acc  = atan2f(acc_Dps[1], acc_Dps[2]) * RAD2DEG;
     float pitch_acc = atan2f(-acc_Dps[0], sqrtf(acc_Dps[1]*acc_Dps[1] + acc_Dps[2]*acc_Dps[2])) * RAD2DEG;
 
+    *a_norm = sqrtf(acc_Dps[0]*acc_Dps[0] + acc_Dps[1]*acc_Dps[1] + acc_Dps[2]*acc_Dps[2]);//1 olmali
+
+    float alpha=ALPHA;
+    if (*a_norm < 0.70f || *a_norm > 1.50f) {
+        alpha = 1.0f;   // 0.996-0.999 arası deneyebilirsin
+    }
+
+
 
     float roll_gyro  = s_roll_deg  + gx * dt; // acc tabanli roll pitch hesabi
     float pitch_gyro = s_pitch_deg + gy * dt;
 
-
-
-
-    s_roll_deg  = ALPHA * roll_gyro  + (1.0f - ALPHA) * roll_acc; //complementary filter
-    s_pitch_deg = ALPHA * pitch_gyro + (1.0f - ALPHA) * pitch_acc;
+    s_roll_deg  = alpha * roll_gyro  + (1.0f - alpha) * roll_acc; //complementary filter
+    s_pitch_deg = alpha * pitch_gyro + (1.0f - alpha) * pitch_acc;
 
     if (roll_out){
     	*roll_out  = s_roll_deg;
