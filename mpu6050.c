@@ -22,7 +22,7 @@ static float s_pitch_deg    = 0.0f;
 
 int MPU6050_ScanDeviceID(I2C_HandleTypeDef *hi2cx){
 	for (uint8_t address = 0; address < 255; ++address) {
-		if (HAL_I2C_IsDeviceReady(hi2cx, address, 1, 1000)==HAL_OK) {
+		if (HAL_I2C_IsDeviceReady(hi2cx, address, 1, 10)==HAL_OK) {
 			return address;
 		}
 
@@ -281,15 +281,20 @@ void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SE
     s_pitch_deg = alpha * pitch_gyro + (1.0f - alpha) * pitch_acc;
 
     if (roll_out){
-    	*roll_out  = s_roll_deg;
+    	*roll_out  =s_roll_deg;
     }
         if (pitch_out){
         *pitch_out = s_pitch_deg;
         }
 }
+float gyroInsMinesBiasForRateRoll(I2C_HandleTypeDef *hi2cx,uint8_t FS_SEL){
+	int16_t gyroRaw[3];
+	float gyroDps[3];
+	MPU6050_getGyroValue(hi2cx, gyroRaw);
+	MPU6050_getGyroIns(gyroRaw, FS_SEL, gyroDps);
 
-
-
+	return gyroDps[0] - s_gyrobias[0];
+}
 
 
 

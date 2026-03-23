@@ -15,8 +15,18 @@
 #define TIMERHZ 500.0f//degisebilir suanlik 500hz
 #define DEADBAND 2.0f
 
+
+typedef struct{
+	float motor1;
+	float motor2;
+	float motor3;
+	float motor4;
+}motors_t;
+
 void Control_pid_Roll_Rate_Init(void);
 float Control_pid_Roll_Rate_Update(float RollRate_FromJoystick,float RollRate_FromGyro);
+void Control_pid_Roll_Angle_Init(void);
+void Control_pid_pitch_Init(void);
 
 
 #endif /* INC_CONTROL_H_ */

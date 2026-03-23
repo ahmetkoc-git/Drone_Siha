@@ -105,4 +105,5 @@ void MPU6050_getGyroIns(int16_t *gyroData, uint8_t FS_SEL,float *gyroDataIns);
 void CalibrateGyroBias(I2C_HandleTypeDef *hi2cx,uint8_t FS_SEL, uint16_t Sample);
 void InitRollAndPitchFromAccel(I2C_HandleTypeDef *hi2cx,uint8_t AFS_SEL);
 void UpdateRollAndPitch(I2C_HandleTypeDef *hi2cx, uint8_t AFS_SEL, uint8_t FS_SEL, float *roll_out, float *pitch_out,float *a_norm);
+float gyroInsMinesBiasForRateRoll(I2C_HandleTypeDef *hi2cx,uint8_t FS_SEL);
 #endif /* INC_MPU6050_H_ */
