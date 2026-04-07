@@ -52,6 +52,7 @@ TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN PV */
+uint16_t pwm =1000;
 ////////////MPU6050 PV///////////////
 int MPU6050_adress;
 int16_t MPU6050_AccelRaw[3];
@@ -73,13 +74,14 @@ float altitude;
 float filtered_altitude;
 ///////////////////////////////////////
 ////////////NRF PVS//////////////////////
-
 uint8_t RXBuffer[4];
 int8_t rollFromJoystick;
 int8_t pitchFromJoystick;
 int8_t yawFromJoystick;
-int8_t altitudeFromJoystick;
+int16_t altitudeFromJoystick=1100;
 uint8_t status;
+uint32_t lastReceiveTime;
+uint8_t nrf_data_received;
 //////////CONTROL PV/////////////////////
 volatile float pidROLLOutput;
 motors_t motors;
@@ -99,27 +101,43 @@ static void MX_SPI1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void motormixer(float throttle,float rollOutput){
-	motors.motor1 = throttle + rollOutput;
-	motors.motor2 = throttle + rollOutput;
-	motors.motor3 = throttle - rollOutput;
-	motors.motor4 = throttle - rollOutput;
+	motors.motor1 = throttle - rollOutput; // ön sağ
+	motors.motor2 = throttle + rollOutput; // ön sol
+	motors.motor3 = throttle - rollOutput; // arka sağ
+	motors.motor4 = throttle + rollOutput; // arka sol
 }
 void setMotorPWM(){
-	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,(uint16_t)motors.motor1);
-	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_2,(uint16_t)motors.motor2);
-	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_3,(uint16_t)motors.motor3);
-	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_4,(uint16_t)motors.motor4);
+	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_2,(uint16_t)motors.motor1);//on sağ
+	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_1,(uint16_t)motors.motor2);//on sol
+	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_4,(uint16_t)motors.motor3);//arka sag
+	__HAL_TIM_SET_COMPARE(&htim3,TIM_CHANNEL_3,(uint16_t)motors.motor4);//arka sol
 }
-
 void NRF_Receive(){
 	status=nrf24l01p_get_status();
+
+	 nrf_data_received = 1;
 		   if (status & (1 << 6)) {
+			   lastReceiveTime = HAL_GetTick();
 			   nrf24l01p_rx_receive(RXBuffer);
 			   rollFromJoystick =(int8_t) RXBuffer[0];
 			   pitchFromJoystick =(int8_t) RXBuffer[1];
 			   yawFromJoystick =(int8_t) RXBuffer[2];
-			   altitudeFromJoystick= (int8_t)RXBuffer[3];
+			   altitudeFromJoystick= ((int16_t)RXBuffer[3]) * 10;
 			   nrf24l01p_clear_rx_dr();
+			   HAL_GPIO_WritePin(led_GPIO_Port, led_Pin, 1);
+		   }
+		   if (nrf_data_received) {
+		          if (HAL_GetTick() - lastReceiveTime > 1000) {
+		              // 1 saniyedir veri yok
+
+		              nrf_data_received = 0;
+
+		              // Güvenli moda geç (çok önemli drone için)
+		              rollFromJoystick  = 0;
+		              pitchFromJoystick = 0;
+		              yawFromJoystick   = 0;
+		              altitudeFromJoystick = 0;
+		          }
 		   }
 }
 /* USER CODE END 0 */
@@ -171,7 +189,7 @@ __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 2000);
 __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 2000);
 HAL_GPIO_WritePin(led_GPIO_Port,led_Pin, 1);
 
-HAL_Delay(5000);   // Bu sırada bataryayı tak
+HAL_Delay(2500);
 
 // Sonra min
 __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 1000);
@@ -179,7 +197,8 @@ __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 1000);
 __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 1000);
 __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 1000);
 
-HAL_Delay(3000);
+HAL_Delay(2500);
+HAL_GPIO_WritePin(led_GPIO_Port,led_Pin, 0);//mavi led sönünce kalibrasyon bitti
 /////////////MPU6050 CODES////////////////////
 MPU6050_adress = MPU6050_ScanDeviceID(&hi2c1);
 MPU6050_InitValue = MPU6050_Init(&hi2c1, MPU6050_ACCEL_RANGE_8G, MPU6050_GYRO_RANGE_2000);
@@ -202,6 +221,9 @@ Control_pid_Roll_Rate_Init();
 nrf24l01p_rx_init(2500, _250kbps);
 HAL_Delay(50);
 //pid rolloutput -10 oluyor -30 gönderince.
+
+HAL_GPIO_WritePin(green_led_GPIO_Port, green_led_Pin, 1);//yeşil led yanınca döngüye girdik.
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -212,6 +234,7 @@ HAL_Delay(50);
 
     /* USER CODE BEGIN 3 */
 
+	  HAL_GPIO_WritePin(orange_GPIO_Port, orange_Pin, 1);
 	  ///////////////MPU6050 CODES////////////////
 	  MPU6050_getAccelValue(&hi2c1, MPU6050_AccelRaw);
 	  MPU6050_getGyroValue(&hi2c1, MPU6050_GyroRaw);
@@ -225,17 +248,20 @@ HAL_Delay(50);
       altitude = PressureToAltitude(pressure, p0);
       filtered_altitude = FilterAltitude(altitude, filtered_altitude);*/
       //////////////////////////////////////////////////////////////////////////////////////////////
+               NRF_Receive();
+              /* __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, altitudeFromJoystick);
+               __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, altitudeFromJoystick);
+               __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, altitudeFromJoystick);
+               __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, altitudeFromJoystick);*/
 
-      ///testmotor////////
 
-	  HAL_GPIO_WritePin(led_GPIO_Port, led_Pin, 0);
-
-              __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 1200);
-              __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 1200);
-              __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 1200);
-              __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 1200);
-
-              NRF_Receive();
+              ////burada maximum ve minimum throtleları da teyit ettikten sonra tam dengede kalınan pwm değerini bulacağız(kumanda ile veri göndererek)
+              ////o hover throtleını joystickin orta konumu olarak ayarlayacağız.pidde base throttle olacak aynı zamanda. //1400 ile tunning yapılacak.
+              ////ardından dronu bağlayıp rate pid algoritmasını yazacağız.
+              ////pid algoritması yaparken rate pid için kumandadan komut gitmeyecek elle iteceğim geri gelme titreşimine baglı olarak p i d ayarlanacak.
+              ////önerilen değerler kp 0.08f kd 0.003f
+              ////ardından angle pid roll ve pitche geçilecek angle pid nin outputu rate pidnin setpointi olarak gelecek
+              ////VE UÇUŞ TESTİ.
   }
   /* USER CODE END 3 */
 }
@@ -489,7 +515,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, ce_Pin|nss_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(led_GPIO_Port, led_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, green_led_Pin|orange_Pin|led_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : ce_Pin nss_Pin */
   GPIO_InitStruct.Pin = ce_Pin|nss_Pin;
@@ -498,12 +524,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : led_Pin */
-  GPIO_InitStruct.Pin = led_Pin;
+  /*Configure GPIO pins : green_led_Pin orange_Pin led_Pin */
+  GPIO_InitStruct.Pin = green_led_Pin|orange_Pin|led_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(led_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -514,8 +540,8 @@ static void MX_GPIO_Init(void)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 if (htim ->Instance == TIM6) {
-    pidROLLOutput=Control_pid_Roll_Rate_Update(rollFromJoystick, GyroInsForControl);
-    motormixer(1000, pidROLLOutput);//throtle joystickden alacağız.
+    pidROLLOutput=Control_pid_Roll_Rate_Update(rollFromJoystick, GyroInsForControl,ROLL);
+    motormixer(altitudeFromJoystick, pidROLLOutput);//throtle joystickden alacağız.
     setMotorPWM();
 }
 }

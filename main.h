@@ -63,6 +63,10 @@ void Error_Handler(void);
 #define ce_GPIO_Port GPIOC
 #define nss_Pin GPIO_PIN_5
 #define nss_GPIO_Port GPIOC
+#define green_led_Pin GPIO_PIN_12
+#define green_led_GPIO_Port GPIOD
+#define orange_Pin GPIO_PIN_13
+#define orange_GPIO_Port GPIOD
 #define led_Pin GPIO_PIN_15
 #define led_GPIO_Port GPIOD
 
